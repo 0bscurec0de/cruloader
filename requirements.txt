@@ -1,0 +1,3 @@
+pefile
+arc4
+requests
