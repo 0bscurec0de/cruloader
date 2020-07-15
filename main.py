@@ -8,7 +8,7 @@ ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567890./='
 URL_REGEX = r'((http|https)\:\/\/)?[a-zA-Z0-9\.\/\?\:@\-_=#]+\.([a-zA-Z]){2,6}([a-zA-Z0-9\.\&\/\?\:@\-_=#])*'
 
 
-class Zero2Auto:
+class CruLoaderDecoder:
     def __init__(self, file_path):
         self.pe = pefile.PE(file_path)
 
@@ -29,9 +29,9 @@ class Zero2Auto:
                 )
 
     @staticmethod
-    def get_embedded_urls(file_path):
-        with open(file_path, 'rb') as f:
-            data = f.read()
+    def get_payload_embedded_url(file_path):
+        with open(file_path, 'rb') as g:
+            data = g.read()
 
         data = data[data.index(b'cruloader'):data.index(b'aaaaaaaaaaaaaaaa')]
 
@@ -41,39 +41,31 @@ class Zero2Auto:
             if len(key) == 1:
                 key = key.pop()
                 string = ''.join(chr(((char << 4) & 0xFF) + ((char >> 4) & 0xFF) ^ key) for char in data[i:])
-                url = re.match(URL_REGEX, string)
+                match = re.match(URL_REGEX, string)
 
-                if url:
-                    return string[url.start():url.end()]
+                if match:
+                    return string[match.start():match.end()]
 
     @staticmethod
     def __extract_payload(image_buffer):
         pe = image_buffer[image_buffer.index(b'cruloader'[::-1]) + 9:]
         key = pe[0] ^ ord('M')
 
-        payload = bytearray()
+        buffer = bytearray()
         for char in pe:
-            payload.append(char ^ key)
-        return payload
+            buffer.append(char ^ key)
+        return buffer
 
     def get_decrypted_resource(self):
         data = self.__get_resource()
-        clean = self.decrypt(data[0x0C:0x1B], data[0x1C:])
-
-        with open('cruloader.bin', 'wb') as f:
-            f.write(clean)
+        return self.decrypt(data[0x0C:0x1B], data[0x1C:])
 
     def get_payload(self, url):
         try:
             final_url = get(url).text
-
             r = get(final_url)
             r.raise_for_status()
-
-            with open('payload.bin', 'wb') as f:
-                f.write(self.__extract_payload(r.content))
-
-            return final_url
+            return final_url, self.__extract_payload(r.content)
         except:
             pass
 
@@ -87,18 +79,28 @@ if __name__ == '__main__':
     ]
 
     # Decode strings
+    print('[1] Packer Strings\n')
     for word in strings:
-        print(f'{word} {Zero2Auto.rot_13(word)}')
+        print(f'\t{word} -> {CruLoaderDecoder.rot_13(word)}')
 
     # Extract resource
-    analyzer = Zero2Auto('main_bin.bin')
-    analyzer.get_decrypted_resource()
+    print('\n[2] Extracting Cruloader')
+    analyzer = CruLoaderDecoder('main_bin.bin')
+    pe_resource = analyzer.get_decrypted_resource()
+
+    with open('cruloader.bin', 'wb') as f:
+        f.write(pe_resource)
 
     # Layer 2
     # Extract URL
-    url = analyzer.get_embedded_urls('cruloader.bin')
-    print(url)
+    print('\n[3] Finding embedded URL\n')
+    first_url = analyzer.get_payload_embedded_url('cruloader.bin')
+    print(f'\t{first_url}')
 
     # Download and extract payload
-    final_url = analyzer.get_payload(url)
-    print(final_url)
+    print('\n[4] Downloading Payload\n')
+    second_url, payload = analyzer.get_payload(first_url)
+    print(f'\t{second_url}')
+
+    with open('payload.bin', 'wb') as f:
+        f.write(payload)
